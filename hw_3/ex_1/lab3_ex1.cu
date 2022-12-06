@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
   
   // Initialize hostInput1 and hostInput2 to random numbers.
 
-  std::normal_distribution<DataType> distribution(0.0, 1.0);
+  std::normal_distribution<DataType> distribution(0.0, 10.0);
   std::default_random_engine gen(1337);
   
   for (DataType *ptr : {hostInput1, hostInput2}) {
@@ -114,6 +114,7 @@ int main(int argc, char **argv) {
   //@@ Launch the GPU Kernel here
   start_clock();
   vecAdd<<<blocks, TPB>>>(deviceInput1, deviceInput2, deviceOutput, inputLength);
+  cudaDeviceSynchronize();
   elapsed = stop_clock();
   printf("kernel execution time : %f\n", elapsed);
 
