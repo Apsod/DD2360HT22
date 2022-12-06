@@ -111,21 +111,21 @@ int main(int argc, char **argv) {
 
 
 
-  //@@ Launch the GPU Kernel here
+  // Launch the GPU Kernel
   start_clock();
   vecAdd<<<blocks, TPB>>>(deviceInput1, deviceInput2, deviceOutput, inputLength);
   cudaDeviceSynchronize();
   elapsed = stop_clock();
   printf("kernel execution time : %f\n", elapsed);
 
-  //@@ Copy the GPU memory back to the CPU here
+  // Copy the GPU memory back to the CPU
 
   start_clock();
   cudaMemcpy(hostOutput, deviceOutput, inputLength * sizeof*hostOutput, cudaMemcpyDeviceToHost);
   elapsed = stop_clock();
   printf("device to host memcpy : %f\n", elapsed); 
 
-  //@@ Insert code below to compare the output with the reference
+  // Compare the output with the reference
 
   DataType m = hostOutput[0] - resultRef[0];
   DataType m2 = 0.0;
