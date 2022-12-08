@@ -3,8 +3,14 @@
 #include <random>
 #include <stdarg.h>
 
-#define DataType double
 #define MAXTHREADS 1024
+
+#ifdef FLOAT
+#define DataType float
+#endif
+#ifndef FLOAT
+#define DataType double
+#endif
 
 #ifdef VERBOSE
 //COPIED FROM STACK OVERFLOW
@@ -222,7 +228,7 @@ int main(int argc, char **argv) {
       err += delta;
   }
 
-  myprint("norm of difference: %f\n", sqrt(err));
+  printf("norm of difference: %f\n", sqrt(err));
   #endif
 
   // Free the GPU memory
