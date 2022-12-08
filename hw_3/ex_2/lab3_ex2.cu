@@ -143,9 +143,11 @@ int main(int argc, char **argv) {
   myprint("Input matrix dim (%d x %d) (%d x %d) (%d x %d)\n", numARows, numAColumns, numBRows, numBColumns, numCRows, numCColumns);
 
   //@@ Initialize the grid and block dimensions here
-  int TPB = asMultipleOf(divUp(INNER, divUp(INNER, MAXTHREADS)), 32); 
+  int blocks_per_inner = divUp(INNER, MAXTHREADS);
+  int TPB = asMultipleOf(divUp(INNER, blocks_per_inner), 32); 
+  //int TPB = asMultipleOf(divUp(INNER, divUp(INNER, MAXTHREADS)), 32); 
   //int TPB = min(asMultipleOf(INNER, 32), 1024); //INNER;
-  int blocks_per_inner = divUp(INNER, TPB); 
+  //int blocks_per_inner = divUp(INNER, TPB); 
   int BLOCKS = blocks_per_inner * numelsC; 
   int SHARED = TPB * sizeof *deviceC;
 
@@ -195,10 +197,10 @@ int main(int argc, char **argv) {
   start_clock();
   cudaMemcpy(deviceA, hostA, numelsA * sizeof *hostA, cudaMemcpyHostToDevice);
   cudaMemcpy(deviceB, hostB, numelsB * sizeof *hostB, cudaMemcpyHostToDevice);
-  cudaMemset(deviceC, 0, numelsC * sizeof *hostC); 
   elapsed = stop_clock();
-  myprint("device to host : %f\n", elapsed); 
+  myprint("host to device : %f\n", elapsed); 
 
+  cudaMemset(deviceC, 0, numelsC * sizeof *hostC); 
 
 
   //@@ Launch the GPU Kernel here
