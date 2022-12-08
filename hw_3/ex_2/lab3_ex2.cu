@@ -1,9 +1,24 @@
 #include <stdio.h>
 #include <sys/time.h>
 #include <random>
+#include <stdarg.h>
 
 #define DataType double
 #define MAXTHREADS 1024
+
+#ifdef VERBOSE
+//COPIED FROM STACK OVERFLOW
+void myprint(const char *fmt, ...){
+    va_list args;
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+}
+#endif
+#ifndef VERBOSE
+void myprint(const char *format, ...){}
+#endif
+
 
 __host__  __device__ int divUp(int numerator, int denominator) {
     // Returns numerator / denominator rounded up. 
@@ -29,7 +44,6 @@ double stop_clock() {
     clock_t stop_time = clock();
     return ((double) (stop_time - CLOCK)) / CLOCKS_PER_SEC;
 }
-
 
 // Compute C = A * B
 __global__ void gemm(DataType *A, DataType *B, DataType *C, int numARows,
@@ -120,7 +134,7 @@ int main(int argc, char **argv) {
 
   int INNER = numAColumns;
 
-  printf("Input matrix dim (%d x %d) (%d x %d) (%d x %d)\n", numARows, numAColumns, numBRows, numBColumns, numCRows, numCColumns);
+  myprint("Input matrix dim (%d x %d) (%d x %d) (%d x %d)\n", numARows, numAColumns, numBRows, numBColumns, numCRows, numCColumns);
 
   //@@ Initialize the grid and block dimensions here
   int TPB = asMultipleOf(divUp(INNER, divUp(INNER, MAXTHREADS)), 32); 
@@ -129,7 +143,7 @@ int main(int argc, char **argv) {
   int BLOCKS = blocks_per_inner * numelsC; 
   int SHARED = TPB * sizeof *deviceC;
 
-  printf("blocks: %d (%d * %d), tpb: %d\n", BLOCKS, blocks_per_inner, numelsC, TPB); 
+  myprint("blocks: %d (%d * %d), tpb: %d\n", BLOCKS, blocks_per_inner, numelsC, TPB); 
   
   //@@ Insert code below to allocate Host memory for input and output
   hostA = (DataType*) malloc(numelsA * sizeof *hostA);
@@ -149,6 +163,7 @@ int main(int argc, char **argv) {
       hostB[i] = distribution(gen);
   }
 
+  #ifdef CHECK
   start_clock();
   for (int i=0; i<numelsC; ++i){
       int c_r = i / numCColumns;
@@ -160,7 +175,8 @@ int main(int argc, char **argv) {
       }
   }
   elapsed = stop_clock();
-  printf("host           : %f\n", elapsed); 
+  myprint("host           : %f\n", elapsed); 
+  #endif
 
   //@@ Insert code below to allocate GPU memory here
 
@@ -175,7 +191,7 @@ int main(int argc, char **argv) {
   cudaMemcpy(deviceB, hostB, numelsB * sizeof *hostB, cudaMemcpyHostToDevice);
   cudaMemset(deviceC, 0, numelsC * sizeof *hostC); 
   elapsed = stop_clock();
-  printf("device to host : %f\n", elapsed); 
+  myprint("device to host : %f\n", elapsed); 
 
 
 
@@ -185,28 +201,29 @@ int main(int argc, char **argv) {
   gemm<<<BLOCKS, TPB, SHARED>>>(deviceA, deviceB, deviceC, numARows, numAColumns, numBRows, numBColumns);
   cudaDeviceSynchronize();
   elapsed = stop_clock();
-  printf("kernel         : %f\n", elapsed); 
+  myprint("kernel         : %f\n", elapsed); 
   //@@ Copy the GPU memory back to the CPU here
   
   start_clock();
   cudaMemcpy(hostC, deviceC, numelsC * sizeof *hostC, cudaMemcpyDeviceToHost);
   elapsed = stop_clock();
-  printf("device to host : %f\n", elapsed); 
+  myprint("device to host : %f\n", elapsed); 
 
   //@@ Insert code below to compare the output with the reference
-
+  #ifdef CHECK
   double err = 0.0;
   double delta = 0.0;
   for (int i= 0; i < numelsC; ++i){
       delta = pow(hostC[i] - resultRef[i], 2);
       if (delta > 0.1) {
-          printf("%d %d\n", i / numCColumns, i % numCColumns);
-          printf("(%f - %f)^2: %f\n\n", hostC[i], resultRef[i], delta);
+          myprint("%d %d\n", i / numCColumns, i % numCColumns);
+          myprint("(%f - %f)^2: %f\n\n", hostC[i], resultRef[i], delta);
       }
       err += delta;
   }
 
-  printf("norm of difference: %f\n", sqrt(err));
+  myprint("norm of difference: %f\n", sqrt(err));
+  #endif
 
   // Free the GPU memory
 
