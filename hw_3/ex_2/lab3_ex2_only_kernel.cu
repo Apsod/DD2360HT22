@@ -149,19 +149,6 @@ int main(int argc, char **argv) {
       hostB[i] = distribution(gen);
   }
 
-  start_clock();
-  for (int i=0; i<numelsC; ++i){
-      int c_r = i / numCColumns;
-      int c_c = i % numCColumns;
-      for (int k=0; k<INNER; ++k){
-          int ai = c_r * numAColumns + k;
-          int bi = k * numBColumns + c_c;
-          resultRef[i] += hostA[ai] * hostB[bi];
-      }
-  }
-  elapsed = stop_clock();
-  printf("host           : %f\n", elapsed); 
-
   //@@ Insert code below to allocate GPU memory here
 
   cudaMalloc(&deviceA, numelsA * sizeof *deviceA);
@@ -176,8 +163,6 @@ int main(int argc, char **argv) {
   cudaMemset(deviceC, 0, numelsC * sizeof *hostC); 
   elapsed = stop_clock();
   printf("device to host : %f\n", elapsed); 
-
-
 
   //@@ Launch the GPU Kernel here
   
@@ -194,19 +179,6 @@ int main(int argc, char **argv) {
   printf("device to host : %f\n", elapsed); 
 
   //@@ Insert code below to compare the output with the reference
-
-  double err = 0.0;
-  double delta = 0.0;
-  for (int i= 0; i < numelsC; ++i){
-      delta = pow(hostC[i] - resultRef[i], 2);
-      if (delta > 0.1) {
-          printf("%d %d\n", i / numCColumns, i % numCColumns);
-          printf("(%f - %f)^2: %f\n\n", hostC[i], resultRef[i], delta);
-      }
-      err += delta;
-  }
-
-  printf("norm of difference: %f\n", sqrt(err));
 
   // Free the GPU memory
 
