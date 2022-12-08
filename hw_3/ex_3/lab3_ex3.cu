@@ -160,7 +160,7 @@ int main(int argc, char **argv) {
   kernel1<<<BLOCKS, TPB, NUM_BINS * sizeof *deviceBins>>>(deviceInput, deviceBins, inputLength, NUM_BINS);
   cudaDeviceSynchronize();
 
-  TPB = asMultipleOf(min(NUM_BINS, 1024), 32);
+  TPB = 32; //asMultipleOf(min(NUM_BINS, 1024), 32);
   int BLOCKS2 = divUp(NUM_BINS, TPB); 
 
   printf("converting: B: %d TPB: %d\n", BLOCKS2, TPB);
