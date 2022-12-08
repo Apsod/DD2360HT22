@@ -3,12 +3,22 @@
 #include <random>
 
 #define DataType double
+#define MAXTHREADS 1024
+
+__host__  __device__ int divUp(int numerator, int denominator) {
+    // Returns the smallest value larger or equal to 
+    // "value" that is a multiple of "factor"
+    // int rest = value % factor;
+    return (numerator + denominator - 1) / denominator;
+    // return rest == 0 ? value : (value + factor - rest);
+}
 
 __host__  __device__ int asMultipleOf(int value, int factor) {
     // Returns the smallest value larger or equal to 
     // "value" that is a multiple of "factor"
-    int rest = value % factor;
-    return rest == 0 ? value : (value + factor - rest);
+    // int rest = value % factor;
+    return factor * divUp(value, factor); 
+    // return rest == 0 ? value : (value + factor - rest);
 }
 
 clock_t CLOCK;
@@ -37,11 +47,10 @@ __global__ void gemm(DataType *A, DataType *B, DataType *C, int numARows,
   const int tid = threadIdx.x;
 
   const int INNER = numAColumns;
-  const int blocks_per_inner = asMultipleOf(INNER, group_size) / group_size; 
+  const int blocks_per_inner = divUp(INNER, group_size); 
 
   const int c_i = blockIdx.x / blocks_per_inner;
-  const int inner = (blockIdx.x % blocks_per_inner) * blockDim.x + threadIdx.x; 
-
+  const int inner = (blockIdx.x % blocks_per_inner) * group_size + tid;
   
   extern __shared__ DataType val[];
 
@@ -60,7 +69,7 @@ __global__ void gemm(DataType *A, DataType *B, DataType *C, int numARows,
 
   for(int i = 1; i < group_size; i = i << 1){
     __syncthreads();
-    if (inner % (i << 1) == 0 and tid+i < group_size) {
+    if (tid % (i << 1) == 0 and tid+i < group_size) {
       val[tid] += val[tid+i];
     }
   }
@@ -118,13 +127,13 @@ int main(int argc, char **argv) {
   printf("Input matrix dim (%d x %d) (%d x %d) (%d x %d)\n", numARows, numAColumns, numBRows, numBColumns, numCRows, numCColumns);
 
   //@@ Initialize the grid and block dimensions here
-
-  int TPB = min(asMultipleOf(INNER, 32), 1024); //INNER;
-  int blocks_per_inner = asMultipleOf(INNER, TPB) / TPB; 
+  int TPB = asMultipleOf(divUp(INNER, divUp(INNER, MAXTHREADS)), 32); 
+  //int TPB = min(asMultipleOf(INNER, 32), 1024); //INNER;
+  int blocks_per_inner = divUp(INNER, TPB); 
   int BLOCKS = blocks_per_inner * numelsC; 
   int SHARED = TPB * sizeof *deviceC;
 
-  printf("blocks: (%d, %d), tpb: %d\n", blocks_per_inner, numelsC, TPB); 
+  printf("blocks: %d (%d * %d), tpb: %d\n", BLOCKS, blocks_per_inner, numelsC, TPB); 
   
   //@@ Insert code below to allocate Host memory for input and output
   hostA = (DataType*) malloc(numelsA * sizeof *hostA);
