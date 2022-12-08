@@ -60,6 +60,8 @@ __global__ void kernel1(unsigned int *input, unsigned int *bins,
   for (int i=bin_start; i<bin_end; ++i){
       val[i] = 0; 
   }
+
+  __syncthreads();
   
   if (input_i < num_elements) {
     atomicAdd(val + input[input_i], 1);
