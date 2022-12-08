@@ -56,6 +56,10 @@ __global__ void kernel1(unsigned int *input, unsigned int *bins,
   const int bin_group = NUM_BINS / group_size;
   const int bin_start = bin_group * tid;
   const int bin_end = min(bin_start + bin_group, num_bins);
+
+  for (int i=bin_start; i<bin_end; ++i){
+      val[i] = 0; 
+  }
   
   if (input_i < num_elements) {
     atomicAdd(val + input[input_i], 1);
