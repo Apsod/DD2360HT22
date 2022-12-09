@@ -233,6 +233,13 @@ int main(int argc, char **argv) {
       }
   }
 
+#ifdef OUTPUT
+  for (int i=0; i < NUM_BINS; ++i){
+      printf("%d ", hostBins[i]);
+  }
+  printf("\n");
+#endif
+
   for (unsigned int *ptr : {deviceInput, deviceBins}) {
     cudaFree(ptr);
   }
