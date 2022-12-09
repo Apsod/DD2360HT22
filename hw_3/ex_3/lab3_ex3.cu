@@ -1,8 +1,39 @@
+#include <stdarg.h>
 #include <stdio.h>
 #include <sys/time.h>
 #include <random>
 
 #define NUM_BINS 4096
+
+#ifndef STRIDE
+#define STRIDE 8
+#endif
+
+#ifdef VERBOSE
+//COPIED FROM STACK OVERFLOW
+void myprint(const char *fmt, ...){
+    va_list args;
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+}
+#endif
+#ifndef VERBOSE
+void myprint(const char *format, ...){}
+#endif
+
+clock_t CLOCK;
+
+void start_clock() {
+    CLOCK = clock();
+}
+
+//@@ Insert code to implement timer stop
+
+double stop_clock() {
+    clock_t stop_time = clock();
+    return ((double) (stop_time - CLOCK)) / CLOCKS_PER_SEC;
+}
 
 __host__  __device__ int divUp(int numerator, int denominator) {
     // Returns numerator / denominator rounded up. 
@@ -22,24 +53,30 @@ __global__ void kernel2(unsigned int *input, unsigned int *bins,
   extern __shared__ unsigned int val[];
   const int tid =  threadIdx.x; 
   const int num = blockIdx.y;
-  const int group_size = blockDim.x; 
-  const int input_start = blockIdx.x * group_size + tid;
-  const int input_end = min(input_start + group_size, num_elements);
+  const int block = blockIdx.x; 
+  const int tpb = blockDim.x; 
 
-  val[tid] = 0; 
+  const int block_chunk = tpb * STRIDE;
+
+  const int input_start = block * block_chunk + tid;
+  const int input_end = min(input_start + block_chunk, num_elements); 
   
-  for (int i=input_start; i<input_end; i+=group_size){
-      if (input[i] == num){
-          val[tid] += 1;
-      }
+  val[tid] = 0;
+
+  
+  for (int i=input_start; i<input_end; i += tpb){
+    if (input[i] == num) {
+        val[tid] +=1;
+    }
   }
 
-  for(int i = 1; i < group_size; i = i << 1){
+  for(int i = 1; i < tpb; i = i << 1){
     __syncthreads();
-    if (tid % (i << 1) == 0 and tid+i < group_size) {
+    if (tid % (i << 1) == 0 and tid+i < tpb) {
       val[tid] += val[tid+i];
     }
   }
+
   if (tid == 0 and val[0] != 0){
       atomicAdd(bins + num, val[0]); 
   }
@@ -50,12 +87,17 @@ __global__ void kernel1(unsigned int *input, unsigned int *bins,
                                  unsigned int num_bins) {
   extern __shared__ unsigned int val[];
   const int tid = threadIdx.x;
-  const int group_size = blockDim.x; 
-  const int input_i = blockIdx.x * group_size + tid; 
+  const int tpb = blockDim.x; 
+  const int block = blockIdx.x;
+
+  const int block_chunk = tpb * STRIDE;
+
+  const int input_start = block * block_chunk + tid; 
+  const int input_end = min(input_start + block_chunk, num_elements); 
   
-  const int bin_group = NUM_BINS / group_size;
-  const int bin_start = bin_group * tid;
-  const int bin_end = min(bin_start + bin_group, num_bins);
+  const int bin_chunk = NUM_BINS / tpb;
+  const int bin_start = bin_chunk * tid;
+  const int bin_end = min(bin_start + bin_chunk, num_bins);
 
   for (int i=bin_start; i<bin_end; ++i){
       val[i] = 0; 
@@ -63,8 +105,8 @@ __global__ void kernel1(unsigned int *input, unsigned int *bins,
 
   __syncthreads();
   
-  if (input_i < num_elements) {
-    atomicAdd(val + input[input_i], 1);
+  for (int i=input_start; i < input_end; i+=tpb){
+    atomicAdd(val + input[i], 1);
   }
 
   __syncthreads();
@@ -97,7 +139,7 @@ int main(int argc, char **argv) {
 
   inputLength = atoi(argv[1]);
 
-  printf("The input length is %d\n", inputLength);
+  myprint("The input length is %d\n", inputLength);
   
   //@@ Insert code below to allocate Host memory for input and output
 
@@ -110,13 +152,21 @@ int main(int argc, char **argv) {
 
   
   //@@ Insert code below to initialize hostInput to random numbers whose values range from 0 to (NUM_BINS - 1)
-
+  
+#ifndef CONGESTION
   std::default_random_engine gen(1337);
   std::uniform_int_distribution<unsigned int> distribution(0, NUM_BINS-1);
 
   for (int i=0; i<inputLength; ++i){
       hostInput[i] = distribution(gen);
   }
+#endif
+#ifdef CONGESTION
+  for (int i=0; i<inputLength; ++i){
+      hostInput[i] = 0; 
+  }
+#endif
+
   
   //@@ Insert code below to create reference result in CPU
 
@@ -139,31 +189,34 @@ int main(int argc, char **argv) {
   //@@ Insert code to initialize GPU results
 
   cudaMemset(deviceBins, 0, NUM_BINS * sizeof *hostBins); 
-
-
-  //@@ Initialize the grid and block dimensions here
-
-  //int TPB = asMultipleOf(min(inputLength, 1024), 32);
-  //dim3 BLOCKS(divUp(inputLength, TPB), NUM_BINS);
-
-  //printf("binning: B: (%d, %d) TPB: %d\n", BLOCKS.x, BLOCKS.y, TPB);
-
-  //kernel2<<<BLOCKS, TPB, TPB * sizeof *deviceBins>>>(deviceInput, deviceBins, inputLength, NUM_BINS);
-  //cudaDeviceSynchronize();
-
-
+  myprint("stride: %d\n", STRIDE);
+#ifdef ALTERNATIVE_KERNEL
   int TPB = asMultipleOf(min(inputLength, 1024), 32);
-  int BLOCKS = divUp(inputLength, TPB);
+  dim3 BLOCKS(divUp(inputLength, TPB*STRIDE), NUM_BINS);
+
+  myprint("binning: B: (%d, %d) TPB: %d\n", BLOCKS.x, BLOCKS.y, TPB);
+
+  kernel2<<<BLOCKS, TPB, TPB * sizeof *deviceBins>>>(deviceInput, deviceBins, inputLength, NUM_BINS);
+  cudaDeviceSynchronize();
+#endif  
+#ifndef ALTERNATIVE_KERNEL
+  int TPB = asMultipleOf(min(inputLength, 1024), 32);
+  int BLOCKS = divUp(inputLength, TPB*STRIDE);
   
-  printf("binning: B: %d TPB: %d\n", BLOCKS, TPB);
+  myprint("binning: B: %d TPB: %d\n", BLOCKS, TPB);
 
   kernel1<<<BLOCKS, TPB, NUM_BINS * sizeof *deviceBins>>>(deviceInput, deviceBins, inputLength, NUM_BINS);
+  cudaDeviceSynchronize();
+#endif
+
+
+
   cudaDeviceSynchronize();
 
   TPB = 32; //asMultipleOf(min(NUM_BINS, 1024), 32);
   int BLOCKS2 = divUp(NUM_BINS, TPB); 
 
-  printf("converting: B: %d TPB: %d\n", BLOCKS2, TPB);
+  myprint("converting: B: %d TPB: %d\n", BLOCKS2, TPB);
 
   convert_kernel<<<BLOCKS2, TPB>>>(deviceBins, NUM_BINS); 
   cudaDeviceSynchronize();
