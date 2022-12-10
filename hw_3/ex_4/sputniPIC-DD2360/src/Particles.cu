@@ -76,8 +76,12 @@ int get_size(int3 stride){
     return stride.x * stride.y * stride.z;
 }
 
-int get_ptr(int3 i, int3 stride){
+__host__ __device__ int get_ptr(int3 i, int3 stride){
     return i.x * stride.y * stride.z + i.y * stride.z + i.z;
+}
+
+int divUp(int d, int n){
+    return (d + n - 1) / n;
 }
 
 void prep_grid_and_field(struct grid* grd, struct EMfield* field, FPfield3* out_grid, FPfield3* out_field)
@@ -101,7 +105,7 @@ void prep_grid_and_field(struct grid* grd, struct EMfield* field, FPfield3* out_
                         grd->XN[x][y][z],
                         grd->YN[x][y][z],
                         grd->ZN[x][y][z]
-                    );
+                        );
                 out_field[ptr] = make_fpfield3(
                         field->Ex[x][y][z],
                         field->Ey[x][y][z],
@@ -111,20 +115,18 @@ void prep_grid_and_field(struct grid* grd, struct EMfield* field, FPfield3* out_
                         field->Bxn[x][y][z],
                         field->Byn[x][y][z],
                         field->Bzn[x][y][z]
-                    );
+                        );
             }
         }
     }
 }
 
-void inner_loop(
-        //struct particles* part,
+__global__ void inner_loop(
         FPpart3* pos,
         FPpart3* vel,
         FPpart3* field,
         FPpart3* grid,
         int3 grid_stride,
-        //struct grid* grd,
         double3 L,
         FPfield3 invd,
         FPfield invVOL,
@@ -132,9 +134,16 @@ void inner_loop(
         FPpart qomdt2,
         char3 periodic,
         int NiterMover,
-        int pix)
+        int sub_cycles, 
+        int nop
+        )
 {
     // auxiliary variables
+    int pix = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (pix >= nop)
+        return;
+
     FPpart dto2 = .5*dt_sub_cycling;
     FPpart omdtsq, denom;
     FPpart3 vt; 
@@ -170,94 +179,96 @@ void inner_loop(
 
     // calculate the average velocity iteratively
     // THIS LOOP IS SEQUENTIAL
-    for(int innter=0; innter < NiterMover; innter++){
-        // interpolation G-->P
-        i = 2 + make_int3(p * invd);
+    for(int n_sub=0; n_sub < sub_cycles; n_sub++){
+        for(int innter=0; innter < NiterMover; innter++){
+            // interpolation G-->P
+            i = 2 + make_int3(p * invd);
 
-        // calculate weights
-        ptr = get_ptr(i, grid_stride)*2;
-        N[0] = p - grid[ptr];
-        N[1] = grid[ptr + 1] - p;
+            // calculate weights
+            ptr = get_ptr(i, grid_stride)*2;
+            N[0] = p - grid[ptr];
+            N[1] = grid[ptr + 1] - p;
 
-        // set to zero local electric and magnetic field
-        El = make_fpfield3(0.0,0.0,0.0); 
-        Bl = make_fpfield3(0.0,0.0,0.0); 
+            // set to zero local electric and magnetic field
+            El = make_fpfield3(0.0,0.0,0.0); 
+            Bl = make_fpfield3(0.0,0.0,0.0); 
+            
+            // THIS LOOP IS PARALLELIZABLE (but only 8 steps unrolled)
+            for (int ii=0; ii < 2; ii++)
+                for (int jj=0; jj < 2; jj++)
+                    for(int kk=0; kk < 2; kk++){
+                        weight = N[ii].x * N[jj].y * N[kk].z * invVOL;
+                        ptr = get_ptr(i - make_int3(ii, jj, kk), grid_stride)*2;
+                        El += weight * field[ptr];
+                        Bl += weight * field[ptr+1]; 
+                    }
+            
+            // end interpolation
+            omdtsq = qomdt2*qomdt2*(dot(Bl, Bl));
+            denom = 1.0/(1.0 + omdtsq);
+            // solve the position equation
+            vt = v + qomdt2*El;
+            // solve the velocity equation
+            v_ = (vt + qomdt2 * (cross(vt, Bl) + qomdt2 * dot(vt, Bl) * Bl)) * denom;
+            // update position
+            p = p_ + v_ * dto2; 
+        } // end of iteration
         
-        // THIS LOOP IS PARALLELIZABLE (but only 8 steps unrolled)
-        for (int ii=0; ii < 2; ii++)
-            for (int jj=0; jj < 2; jj++)
-                for(int kk=0; kk < 2; kk++){
-                    weight = N[ii].x * N[jj].y * N[kk].z * invVOL;
-                    ptr = get_ptr(i - make_int3(ii, jj, kk), grid_stride)*2;
-                    El += weight * field[ptr];
-                    Bl += weight * field[ptr+1]; 
-                }
-        
-        // end interpolation
-        omdtsq = qomdt2*qomdt2*(dot(Bl, Bl));
-        denom = 1.0/(1.0 + omdtsq);
-        // solve the position equation
-        vt = v + qomdt2*El;
-        // solve the velocity equation
-        v_ = (vt + qomdt2 * (cross(vt, Bl) + qomdt2 * dot(vt, Bl) * Bl)) * denom;
-        // update position
-        p = p_ + v_ * dto2; 
-    } // end of iteration
-    
-    v = 2.0 * v_ - v; 
-    p = p_ + v_ * dt_sub_cycling;
+        v = 2.0 * v_ - v; 
+        p = p_ + v_ * dt_sub_cycling;
 
-    if (p.x > L.x){
-        if (periodic.x){ // PERIODIC
-            p.x = p.x - L.x;
-        } else { // REFLECTING BC
-            v.x = -v.x;
-            p.x = 2*L.x - p.x;
+        if (p.x > L.x){
+            if (periodic.x){ // PERIODIC
+                p.x = p.x - L.x;
+            } else { // REFLECTING BC
+                v.x = -v.x;
+                p.x = 2*L.x - p.x;
+            }
         }
-    }
-                                                                
-    if (p.x < 0){
-        if (periodic.x){ // PERIODIC
-           p.x = p.x + L.x;
-        } else { // REFLECTING BC
-            v.x = -v.x;
-            p.x = -p.x;
+                                                                    
+        if (p.x < 0){
+            if (periodic.x){ // PERIODIC
+               p.x = p.x + L.x;
+            } else { // REFLECTING BC
+                v.x = -v.x;
+                p.x = -p.x;
+            }
         }
-    }
 
-    if (p.y > L.y){
-        if (periodic.y){ // PERIODIC
-            p.y = p.y - L.y;
-        } else { // REFLECTING BC
-            v.y = -v.y;
-            p.y = 2*L.y - p.y;
+        if (p.y > L.y){
+            if (periodic.y){ // PERIODIC
+                p.y = p.y - L.y;
+            } else { // REFLECTING BC
+                v.y = -v.y;
+                p.y = 2*L.y - p.y;
+            }
         }
-    }
-                                                                
-    if (p.y < 0){
-        if (periodic.y){ // PERIODIC
-           p.y = p.y + L.y;
-        } else { // REFLECTING BC
-            v.y = -v.y;
-            p.y = -p.y;
+                                                                    
+        if (p.y < 0){
+            if (periodic.y){ // PERIODIC
+               p.y = p.y + L.y;
+            } else { // REFLECTING BC
+                v.y = -v.y;
+                p.y = -p.y;
+            }
         }
-    }
 
-    if (p.z > L.z){
-        if (periodic.z){ // PERIODIC
-            p.z = p.z - L.z;
-        } else { // REFLECTING BC
-            v.z = -v.z;
-            p.z = 2*L.z - p.z;
+        if (p.z > L.z){
+            if (periodic.z){ // PERIODIC
+                p.z = p.z - L.z;
+            } else { // REFLECTING BC
+                v.z = -v.z;
+                p.z = 2*L.z - p.z;
+            }
         }
-    }
-                                                                
-    if (p.z < 0){
-        if (periodic.z){ // PERIODIC
-           p.z = p.z + L.z;
-        } else { // REFLECTING BC
-            v.z = -v.z;
-            p.z = -p.z;
+                                                                    
+        if (p.z < 0){
+            if (periodic.z){ // PERIODIC
+               p.z = p.z + L.z;
+            } else { // REFLECTING BC
+                v.z = -v.z;
+                p.z = -p.z;
+            }
         }
     }
     vel[pix] = v;
@@ -266,24 +277,29 @@ void inner_loop(
 
 
 /** particle mover */
-int mover_PC(struct particles* part, struct EMfield* field, struct grid* grd, struct parameters* param)
+int mover_PC(struct particles* part, struct EMfield* emfield, struct grid* grd, struct parameters* param)
 {
     // print species and subcycling
     std::cout << "***  MOVER with SUBCYCLYING "<< param->n_sub_cycles << " - species " << part->species_ID << " ***" << std::endl;
 
-    FPpart3 *pos, *vel, *grid, *fieldEB;
+    FPpart3 *pos, *vel, *grid, *field;
 
-    pos = new FPpart3[part->nop]; 
-    vel = new FPpart3[part->nop];
+    FPpart3 *d_pos, *d_vel, *d_grid, *d_field;
+
     int3 grid_stride = make_int3(grd->nxn, grd->nyn, grd->nzn);
+    int grid_size = get_size(grid_stride) * 2; 
+    int nop = part->nop;
+    int sub_cycles = part->n_sub_cycles;
+    pos = new FPpart3[nop]; 
+    vel = new FPpart3[nop];
     // std::cout << "*** ALLOCATING GRID. SIZE: " << get_size(grid_stride) * 2 * 4 * 3 << " Bytes.  ***" << std::endl; 
-    grid = new FPpart3[get_size(grid_stride) * 2];
-    fieldEB = new FPpart3[get_size(grid_stride) * 2];
+    grid = new FPpart3[grid_size];
+    field = new FPpart3[grid_size];
 
     // std::cout << "*** PREPPING GRID ***" << std::endl; 
-    prep_grid_and_field(grd, field, grid, fieldEB); 
+    prep_grid_and_field(grd, emfield, grid, field); 
 
-    FPpart dt_sub_cycling = (FPpart) param->dt/((double) part->n_sub_cycles);
+    FPpart dt_sub_cycling = (FPpart) param->dt/((double) sub_cycles);
     FPpart dto2 = .5 * dt_sub_cycling;
     FPpart qomdt2 = part->qom*dto2/param->c;
     char3 periodic = make_char3(param->PERIODICX, param->PERIODICY, param->PERIODICZ);
@@ -293,23 +309,48 @@ int mover_PC(struct particles* part, struct EMfield* field, struct grid* grd, st
     FPfield3 invd = make_fpfield3(grd->invdx, grd->invdy, grd->invdz); 
     FPfield invVOL = grd->invVOL;
 
-
     // std::cout << "*** PREPPING POS & VEL ***" << std::endl; 
-    for (int i=0; i<part->nop; ++i){
+    for (int i=0; i<nop; ++i){
         pos[i] = make_fppart3(part->x[i], part->y[i], part->z[i]);
         vel[i] = make_fppart3(part->u[i], part->v[i], part->w[i]);
     }
 
+    cudaMalloc(&d_pos, nop * sizeof *d_pos);
+    cudaMalloc(&d_vel, nop * sizeof *d_vel);
+    cudaMalloc(&d_grid, grid_size * sizeof *d_grid);
+    cudaMalloc(&d_field, grid_size * sizeof *d_field);
+
+    cudaMemcpy(d_pos, pos, nop * sizeof *d_pos, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_vel, vel, nop * sizeof *d_vel, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_grid, grid, grid_size * sizeof *d_grid, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_field, field, grid_size * sizeof *d_field, cudaMemcpyHostToDevice);
+
+    int BLOCKS = divUp(nop, 32);
+    int THREADS = 32;
+
+
     // std::cout << "*** STARTING ***" << std::endl; 
     // start subcycling
-    for (int i_sub=0; i_sub <  part->n_sub_cycles; i_sub++){
-        // move each particle with new fields
-        for (int i=0; i <  part->nop; i++){
-            inner_loop(pos, vel, fieldEB, grid, grid_stride, L, invd, invVOL, dt_sub_cycling, qomdt2, periodic, NiterMover, i);
-        }  // end of subcycling
-    } // end of one particle
+    //for (int i_sub=0; i_sub <  part->n_sub_cycles; i_sub++){
+    //    // move each particle with new fields
+    //    for (int i=0; i <  part->nop; i++){
+    //        inner_loop(pos, vel, fieldEB, grid, grid_stride, L, invd, invVOL, dt_sub_cycling, qomdt2, periodic, NiterMover, i);
+    //    }  // end of subcycling
+    //} // end of one particle
+    inner_loop<<<BLOCKS, THREADS>>>(d_pos, d_vel, d_field, d_grid, grid_stride, L, invd, invVOL, dt_sub_cycling, qomdt2, periodic, NiterMover, sub_cycles, nop);
+    //for (int i=0; i <  part->nop; i++){
+    //    for (int i_sub=0; i_sub <  part->n_sub_cycles; i_sub++){
+    //        inner_loop(pos, vel, fieldEB, grid, grid_stride, L, invd, invVOL, dt_sub_cycling, qomdt2, periodic, NiterMover, i, sub_cycles, nop);
+    //    }  // end of subcycling
+    //} // end of one particle
+    cudaMemcpy(pos, d_pos, nop * sizeof *d_pos, cudaMemcpyDeviceToHost);
+    cudaMemcpy(vel, d_vel, nop * sizeof *d_vel, cudaMemcpyDeviceToHost);
 
-    for (int i=0; i<part->nop; ++i){
+    for (FPpart3 *ptr : {d_pos, d_vel, grid, field}) {
+        cudaFree(ptr);
+    }
+
+    for (int i=0; i<nop; ++i){
         part->x[i] = pos[i].x;
         part->y[i] = pos[i].y;
         part->z[i] = pos[i].z;
