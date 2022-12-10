@@ -80,26 +80,37 @@ int get_ptr(int3 i, int3 stride){
     return i.x * stride.y * stride.z + i.y * stride.z + i.z;
 }
 
-
-void prep_grid(struct grid* grd, FPfield3* out)
+void prep_grid_and_field(struct grid* grd, struct EMfield* field, FPfield3* out_grid, FPfield3* out_field)
 {
     int ptr; 
-    int X = grd->nxn; 
-    int Y = grd->nyn; 
-    int Z = grd->nzn; 
-    for(int x=1; x<X; x++){
-        for(int y=1; y<Y; y++){
-            for(int z=1; z<Z; z++){
+    int X = grd->nxn;
+    int Y = grd->nyn;
+    int Z = grd->nzn;
+    for(int x=0; x<X; x++){
+        for(int y=0; y<Y; y++){
+            for(int z=0; z<Z; z++){
                 ptr = 2 * (x * Y * Z + y * Z + z);
-                out[ptr] = make_fpfield3(
-                        grd->XN[x - 1][y][z],
-                        grd->YN[x][y - 1][z],
-                        grd->ZN[x][y][z - 1]
-                        );
-                out[ptr+1] = make_fpfield3(
+                if (x * y * z > 0){
+                    out_grid[ptr] = make_fpfield3(
+                            grd->XN[x - 1][y][z],
+                            grd->YN[x][y - 1][z],
+                            grd->ZN[x][y][z - 1]
+                            );
+                }
+                out_grid[ptr+1] = make_fpfield3(
                         grd->XN[x][y][z],
                         grd->YN[x][y][z],
                         grd->ZN[x][y][z]
+                    );
+                out_field[ptr] = make_fpfield3(
+                        field->Ex[x][y][z],
+                        field->Ey[x][y][z],
+                        field->Ez[x][y][z]
+                        );
+                out_field[ptr+1] = make_fpfield3(
+                        field->Bxn[x][y][z],
+                        field->Byn[x][y][z],
+                        field->Bzn[x][y][z]
                     );
             }
         }
@@ -110,7 +121,7 @@ void inner_loop(
         //struct particles* part,
         FPpart3* pos,
         FPpart3* vel,
-        struct EMfield* field,
+        FPpart3* field,
         FPpart3* grid,
         int3 grid_stride,
         //struct grid* grd,
@@ -128,10 +139,9 @@ void inner_loop(
     FPpart omdtsq, denom;
     FPpart3 vt; 
     int3 i; 
-    int3 fi;
     int ptr; 
 
-    FPfield3 E, B;
+    //FPfield3 E, B;
 
     // local (to the particle) electric and magnetic field
     FPfield3 El, Bl;
@@ -173,24 +183,14 @@ void inner_loop(
         El = make_fpfield3(0.0,0.0,0.0); 
         Bl = make_fpfield3(0.0,0.0,0.0); 
         
-        // THIS LOOP IS PARALLELIZABLE (but only 8 * 6 = 48 operations unrolled)
+        // THIS LOOP IS PARALLELIZABLE (but only 8 steps unrolled)
         for (int ii=0; ii < 2; ii++)
             for (int jj=0; jj < 2; jj++)
                 for(int kk=0; kk < 2; kk++){
                     weight = N[ii].x * N[jj].y * N[kk].z * invVOL;
-                    fi = i - make_int3(ii, jj, kk);
-                    E = make_fpfield3(
-                            field->Ex[fi.x][fi.y][fi.z],
-                            field->Ey[fi.x][fi.y][fi.z],
-                            field->Ez[fi.x][fi.y][fi.z]
-                            );
-                    B = make_fpfield3(
-                            field->Bxn[fi.x][fi.y][fi.z],
-                            field->Byn[fi.x][fi.y][fi.z],
-                            field->Bzn[fi.x][fi.y][fi.z]
-                            );
-                    El += weight * E;
-                    Bl += weight * B; 
+                    ptr = get_ptr(i - make_int3(ii, jj, kk), grid_stride)*2;
+                    El += weight * field[ptr];
+                    Bl += weight * field[ptr+1]; 
                 }
         
         // end interpolation
@@ -271,16 +271,17 @@ int mover_PC(struct particles* part, struct EMfield* field, struct grid* grd, st
     // print species and subcycling
     std::cout << "***  MOVER with SUBCYCLYING "<< param->n_sub_cycles << " - species " << part->species_ID << " ***" << std::endl;
 
-    FPpart3 *pos, *vel, *grid;
+    FPpart3 *pos, *vel, *grid, *fieldEB;
 
     pos = new FPpart3[part->nop]; 
     vel = new FPpart3[part->nop];
     int3 grid_stride = make_int3(grd->nxn, grd->nyn, grd->nzn);
     // std::cout << "*** ALLOCATING GRID. SIZE: " << get_size(grid_stride) * 2 * 4 * 3 << " Bytes.  ***" << std::endl; 
     grid = new FPpart3[get_size(grid_stride) * 2];
+    fieldEB = new FPpart3[get_size(grid_stride) * 2];
 
     // std::cout << "*** PREPPING GRID ***" << std::endl; 
-    prep_grid(grd, grid); 
+    prep_grid_and_field(grd, field, grid, fieldEB); 
 
     FPpart dt_sub_cycling = (FPpart) param->dt/((double) part->n_sub_cycles);
     FPpart dto2 = .5 * dt_sub_cycling;
@@ -304,7 +305,7 @@ int mover_PC(struct particles* part, struct EMfield* field, struct grid* grd, st
     for (int i_sub=0; i_sub <  part->n_sub_cycles; i_sub++){
         // move each particle with new fields
         for (int i=0; i <  part->nop; i++){
-            inner_loop(pos, vel, field, grid, grid_stride, L, invd, invVOL, dt_sub_cycling, qomdt2, periodic, NiterMover, i);
+            inner_loop(pos, vel, fieldEB, grid, grid_stride, L, invd, invVOL, dt_sub_cycling, qomdt2, periodic, NiterMover, i);
         }  // end of subcycling
     } // end of one particle
 
