@@ -72,17 +72,64 @@ void particle_deallocate(struct particles* part)
     delete[] part->q;
 }
 
+int get_size(int3 stride){
+    return stride.x * stride.y * stride.z;
+}
 
-void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd, struct parameters* param, int pix){
+int get_ptr(int3 i, int3 stride){
+    return i.x * stride.y * stride.z + i.y * stride.z + i.z;
+}
+
+
+void prep_grid(struct grid* grd, FPfield3* out)
+{
+    int ptr; 
+    int X = grd->nxn; 
+    int Y = grd->nyn; 
+    int Z = grd->nzn; 
+    for(int x=1; x<X; x++){
+        for(int y=1; y<Y; y++){
+            for(int z=1; z<Z; z++){
+                ptr = 2 * (x * Y * Z + y * Z + z);
+                out[ptr] = make_fpfield3(
+                        grd->XN[x - 1][y][z],
+                        grd->YN[x][y - 1][z],
+                        grd->ZN[x][y][z - 1]
+                        );
+                out[ptr+1] = make_fpfield3(
+                        grd->XN[x][y][z],
+                        grd->YN[x][y][z],
+                        grd->ZN[x][y][z]
+                    );
+            }
+        }
+    }
+}
+
+void inner_loop(
+        //struct particles* part,
+        FPpart3* pos,
+        FPpart3* vel,
+        struct EMfield* field,
+        FPpart3* grid,
+        int3 grid_stride,
+        //struct grid* grd,
+        double3 L,
+        FPfield3 invd,
+        FPfield invVOL,
+        FPpart dt_sub_cycling,
+        FPpart qomdt2,
+        char3 periodic,
+        int NiterMover,
+        int pix)
+{
     // auxiliary variables
-    FPpart dt_sub_cycling = (FPpart) param->dt/((double) part->n_sub_cycles);
-    FPpart dto2 = .5*dt_sub_cycling, qomdt2 = part->qom*dto2/param->c;
+    FPpart dto2 = .5*dt_sub_cycling;
     FPpart omdtsq, denom;
     FPpart3 vt; 
     int3 i; 
     int3 fi;
-
-    char3 periodic = make_char3(param->PERIODICX, param->PERIODICY, param->PERIODICZ); 
+    int ptr; 
 
     FPfield3 E, B;
 
@@ -100,35 +147,27 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
     FPpart3 p;
     FPpart3 v; 
     
-    p_ = make_fppart3(part->x[pix], part->y[pix], part->z[pix]);
+    p_ = pos[pix];
+
 
     p = p_;
 
-    v = make_fppart3(part->u[pix], part->v[pix], part->w[pix]);
+    v = vel[pix];
+
     
     // start is always zero, and the original code can't handle wrapping when it isnt.
     //double3 start = make_double3(grd->xStart, grd->yStart, grd->zStart);
-    double3 L = make_double3(grd->Lx, grd->Ly, grd->Lz);
-    FPfield3 invd = make_fpfield3(grd->invdx, grd->invdy, grd->invdz); 
-    FPfield invVOL = grd->invVOL;
 
     // calculate the average velocity iteratively
     // THIS LOOP IS SEQUENTIAL
-    for(int innter=0; innter < part->NiterMover; innter++){
+    for(int innter=0; innter < NiterMover; innter++){
         // interpolation G-->P
         i = 2 + make_int3(p * invd);
 
         // calculate weights
-        N[0] = make_fpfield3(
-                p.x - grd->XN[i.x - 1][i.y][i.z],
-                p.y - grd->YN[i.x][i.y - 1][i.z],
-                p.z - grd->ZN[i.x][i.y][i.z - 1]
-        );
-        N[1] = make_fpfield3(
-                grd->XN[i.x][i.y][i.z] - p.x,
-                grd->YN[i.x][i.y][i.z] - p.y,
-                grd->ZN[i.x][i.y][i.z] - p.z
-        );
+        ptr = get_ptr(i, grid_stride)*2;
+        N[0] = p - grid[ptr];
+        N[1] = grid[ptr + 1] - p;
 
         // set to zero local electric and magnetic field
         El = make_fpfield3(0.0,0.0,0.0); 
@@ -221,16 +260,10 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
             p.z = -p.z;
         }
     }
-
-    part->u[pix] = v.x; 
-    part->v[pix] = v.y; 
-    part->w[pix] = v.z; 
-
-    part->x[pix] = p.x; 
-    part->y[pix] = p.y; 
-    part->z[pix] = p.z; 
+    vel[pix] = v;
+    pos[pix] = p; 
 }
-                                                                        
+
 
 /** particle mover */
 int mover_PC(struct particles* part, struct EMfield* field, struct grid* grd, struct parameters* param)
@@ -238,13 +271,51 @@ int mover_PC(struct particles* part, struct EMfield* field, struct grid* grd, st
     // print species and subcycling
     std::cout << "***  MOVER with SUBCYCLYING "<< param->n_sub_cycles << " - species " << part->species_ID << " ***" << std::endl;
 
+    FPpart3 *pos, *vel, *grid;
+
+    pos = new FPpart3[part->nop]; 
+    vel = new FPpart3[part->nop];
+    int3 grid_stride = make_int3(grd->nxn, grd->nyn, grd->nzn);
+    // std::cout << "*** ALLOCATING GRID. SIZE: " << get_size(grid_stride) * 2 * 4 * 3 << " Bytes.  ***" << std::endl; 
+    grid = new FPpart3[get_size(grid_stride) * 2];
+
+    // std::cout << "*** PREPPING GRID ***" << std::endl; 
+    prep_grid(grd, grid); 
+
+    FPpart dt_sub_cycling = (FPpart) param->dt/((double) part->n_sub_cycles);
+    FPpart dto2 = .5 * dt_sub_cycling;
+    FPpart qomdt2 = part->qom*dto2/param->c;
+    char3 periodic = make_char3(param->PERIODICX, param->PERIODICY, param->PERIODICZ);
+    int NiterMover = part->NiterMover;
+
+    double3 L = make_double3(grd->Lx, grd->Ly, grd->Lz);
+    FPfield3 invd = make_fpfield3(grd->invdx, grd->invdy, grd->invdz); 
+    FPfield invVOL = grd->invVOL;
+
+
+    // std::cout << "*** PREPPING POS & VEL ***" << std::endl; 
+    for (int i=0; i<part->nop; ++i){
+        pos[i] = make_fppart3(part->x[i], part->y[i], part->z[i]);
+        vel[i] = make_fppart3(part->u[i], part->v[i], part->w[i]);
+    }
+
+    // std::cout << "*** STARTING ***" << std::endl; 
     // start subcycling
     for (int i_sub=0; i_sub <  part->n_sub_cycles; i_sub++){
         // move each particle with new fields
         for (int i=0; i <  part->nop; i++){
-            inner_loop(part, field, grd, param, i);
+            inner_loop(pos, vel, field, grid, grid_stride, L, invd, invVOL, dt_sub_cycling, qomdt2, periodic, NiterMover, i);
         }  // end of subcycling
     } // end of one particle
+
+    for (int i=0; i<part->nop; ++i){
+        part->x[i] = pos[i].x;
+        part->y[i] = pos[i].y;
+        part->z[i] = pos[i].z;
+        part->u[i] = vel[i].x;
+        part->v[i] = vel[i].y;
+        part->w[i] = vel[i].z;
+    }
 
     return(0); // exit succcesfully
 } // end of the mover
