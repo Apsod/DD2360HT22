@@ -3,8 +3,6 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-#define ORIGINAL
-
 /** allocate particle arrays */
 void particle_allocate(struct parameters* param, struct particles* part, int is)
 {
@@ -75,166 +73,13 @@ void particle_deallocate(struct particles* part)
 }
 
 
-
-#ifdef ORIGINAL
-void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd, struct parameters* param, int i){
-    // auxiliary variables
-    int ix, iy, iz;
-    FPpart dt_sub_cycling = (FPpart) param->dt/((double) part->n_sub_cycles);
-    FPpart dto2 = .5*dt_sub_cycling, qomdt2 = part->qom*dto2/param->c;
-    FPpart omdtsq, denom, ut, vt, wt, udotb;
-    
-    // local (to the particle) electric and magnetic field
-    FPfield Exl=0.0, Eyl=0.0, Ezl=0.0, Bxl=0.0, Byl=0.0, Bzl=0.0;
-    
-    // interpolation densities
-    FPfield weight[2][2][2];
-    FPfield xi[2], eta[2], zeta[2];
-    
-    // intermediate particle position and velocity
-    FPpart xptilde, yptilde, zptilde, uptilde, vptilde, wptilde;
-
-    FPpart3 p = make_fppart3(part->x[i], part->y[i], part->z[i]);
-
-    xptilde = p.x;
-    yptilde = p.y;
-    zptilde = p.z;
-    // calculate the average velocity iteratively
-    for(int innter=0; innter < part->NiterMover; innter++){
-        // interpolation G-->P
-        ix = 2 +  int((p.x - grd->xStart)*grd->invdx);
-        iy = 2 +  int((p.y - grd->yStart)*grd->invdy);
-        iz = 2 +  int((p.z - grd->zStart)*grd->invdz);
-        
-        // calculate weights
-        xi[0]   = p.x - grd->XN[ix - 1][iy][iz];
-        eta[0]  = p.y - grd->YN[ix][iy - 1][iz];
-        zeta[0] = p.z - grd->ZN[ix][iy][iz - 1];
-        xi[1]   = grd->XN[ix][iy][iz] - p.x;
-        eta[1]  = grd->YN[ix][iy][iz] - p.y;
-        zeta[1] = grd->ZN[ix][iy][iz] - p.z;
-        for (int ii = 0; ii < 2; ii++)
-            for (int jj = 0; jj < 2; jj++)
-                for (int kk = 0; kk < 2; kk++)
-                    weight[ii][jj][kk] = xi[ii] * eta[jj] * zeta[kk] * grd->invVOL;
-        
-        // set to zero local electric and magnetic field
-        Exl=0.0, Eyl = 0.0, Ezl = 0.0, Bxl = 0.0, Byl = 0.0, Bzl = 0.0;
-        
-        for (int ii=0; ii < 2; ii++)
-            for (int jj=0; jj < 2; jj++)
-                for(int kk=0; kk < 2; kk++){
-                    Exl += weight[ii][jj][kk]*field->Ex[ix- ii][iy -jj][iz- kk ];
-                    Eyl += weight[ii][jj][kk]*field->Ey[ix- ii][iy -jj][iz- kk ];
-                    Ezl += weight[ii][jj][kk]*field->Ez[ix- ii][iy -jj][iz -kk ];
-                    Bxl += weight[ii][jj][kk]*field->Bxn[ix- ii][iy -jj][iz -kk ];
-                    Byl += weight[ii][jj][kk]*field->Byn[ix- ii][iy -jj][iz -kk ];
-                    Bzl += weight[ii][jj][kk]*field->Bzn[ix- ii][iy -jj][iz -kk ];
-                }
-        
-        // end interpolation
-        omdtsq = qomdt2*qomdt2*(Bxl*Bxl+Byl*Byl+Bzl*Bzl);
-        denom = 1.0/(1.0 + omdtsq);
-        // solve the position equation
-        ut= part->u[i] + qomdt2*Exl;
-        vt= part->v[i] + qomdt2*Eyl;
-        wt= part->w[i] + qomdt2*Ezl;
-        udotb = ut*Bxl + vt*Byl + wt*Bzl;
-        // solve the velocity equation
-        uptilde = (ut+qomdt2*(vt*Bzl -wt*Byl + qomdt2*udotb*Bxl))*denom;
-        vptilde = (vt+qomdt2*(wt*Bxl -ut*Bzl + qomdt2*udotb*Byl))*denom;
-        wptilde = (wt+qomdt2*(ut*Byl -vt*Bxl + qomdt2*udotb*Bzl))*denom;
-        // update position
-        p.x = xptilde + uptilde*dto2;
-        p.y = yptilde + vptilde*dto2;
-        p.z = zptilde + wptilde*dto2;
-        
-        
-    } // end of iteration
-    // update the final position and velocity
-    part->u[i]= 2.0*uptilde - part->u[i];
-    part->v[i]= 2.0*vptilde - part->v[i];
-    part->w[i]= 2.0*wptilde - part->w[i];
-    p.x = xptilde + uptilde*dt_sub_cycling;
-    p.y = yptilde + vptilde*dt_sub_cycling;
-    p.z = zptilde + wptilde*dt_sub_cycling;
-    
-    
-    //////////
-    //////////
-    ////////// BC
-                                
-    // X-DIRECTION: BC particles
-    if (p.x > grd->Lx){
-        if (param->PERIODICX==true){ // PERIODIC
-            p.x = p.x - grd->Lx;
-        } else { // REFLECTING BC
-            part->u[i] = -part->u[i];
-            p.x = 2*grd->Lx - p.x;
-        }
-    }
-                                                                
-    if (p.x < 0){
-        if (param->PERIODICX==true){ // PERIODIC
-           p.x = p.x + grd->Lx;
-        } else { // REFLECTING BC
-            part->u[i] = -part->u[i];
-            p.x = -p.x;
-        }
-    }
-        
-    
-    // Y-DIRECTION: BC particles
-    if (p.y > grd->Ly){
-        if (param->PERIODICY==true){ // PERIODIC
-            p.y = p.y - grd->Ly;
-        } else { // REFLECTING BC
-            part->v[i] = -part->v[i];
-            p.y = 2*grd->Ly - p.y;
-        }
-    }
-                                                                
-    if (p.y < 0){
-        if (param->PERIODICY==true){ // PERIODIC
-            p.y = p.y + grd->Ly;
-        } else { // REFLECTING BC
-            part->v[i] = -part->v[i];
-            p.y = -p.y;
-        }
-    }
-                                                                
-    // Z-DIRECTION: BC particles
-    if (p.z > grd->Lz){
-        if (param->PERIODICZ==true){ // PERIODIC
-            p.z = p.z - grd->Lz;
-        } else { // REFLECTING BC
-            part->w[i] = -part->w[i];
-            p.z = 2*grd->Lz - p.z;
-        }
-    }
-                                                                
-    if (p.z < 0){
-        if (param->PERIODICZ==true){ // PERIODIC
-            p.z = p.z + grd->Lz;
-        } else { // REFLECTING BC
-            part->w[i] = -part->w[i];
-            p.z = -p.z;
-        }
-    }
-
-    part->x[i] = p.x;
-    part->y[i] = p.y;
-    part->z[i] = p.z;
-}
-#endif
-#ifndef ORIGINAL
-void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd, struct parameters* param, int i){
+void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd, struct parameters* param, int pix){
     // auxiliary variables
     FPpart dt_sub_cycling = (FPpart) param->dt/((double) part->n_sub_cycles);
     FPpart dto2 = .5*dt_sub_cycling, qomdt2 = part->qom*dto2/param->c;
     FPpart omdtsq, denom;
     FPpart3 vt; 
-    int3 pi; 
+    int3 i; 
     int3 fi;
 
     char3 peroidic = make_char3(param->PERIODICX, param->PERIODICY, param->PERIODICZ); 
@@ -255,11 +100,11 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
     FPpart3 p;
     FPpart3 v; 
     
-    p_ = make_fppart3(part->x[i], part->y[i], part->z[i]);
+    p_ = make_fppart3(part->x[pix], part->y[pix], part->z[pix]);
 
     p = p_;
 
-    v = make_fppart3(part->u[i], part->v[i], part->w[i]);
+    v = make_fppart3(part->u[pix], part->v[pix], part->w[pix]);
 
     double3 start = make_double3(grd->xStart, grd->yStart, grd->zStart);
     double3 L = make_double3(grd->Lx, grd->Ly, grd->Lz);
@@ -270,18 +115,18 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
     // THIS LOOP IS SEQUENTIAL
     for(int innter=0; innter < part->NiterMover; innter++){
         // interpolation G-->P
-        pi = 2 + make_int3((p - make_float3(start)) * invd);
+        i = 2 + make_int3((p - make_float3(start)) * invd);
 
         // calculate weights
         N[0] = make_fpfield3(
-                p.x - grd->XN[pi.x - 1][pi.y][pi.z],
-                p.y - grd->YN[pi.x][pi.y - 1][pi.z],
-                p.z - grd->ZN[pi.x][pi.y][pi.z - 1]
+                p.x - grd->XN[i.x - 1][i.y][i.z],
+                p.y - grd->YN[i.x][i.y - 1][i.z],
+                p.z - grd->ZN[i.x][i.y][i.z - 1]
         );
         N[1] = make_fpfield3(
-                grd->XN[pi.x][pi.y][pi.z] - p.x,
-                grd->YN[pi.x][pi.y][pi.z] - p.y,
-                grd->ZN[pi.x][pi.y][pi.z] - p.z
+                grd->XN[i.x][i.y][i.z] - p.x,
+                grd->YN[i.x][i.y][i.z] - p.y,
+                grd->ZN[i.x][i.y][i.z] - p.z
         );
 
         // set to zero local electric and magnetic field
@@ -293,7 +138,7 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
             for (int jj=0; jj < 2; jj++)
                 for(int kk=0; kk < 2; kk++){
                     weight = N[ii].x * N[jj].y * N[kk].z * invVOL;
-                    fi = pi - make_int3(ii, jj, kk);
+                    fi = i - make_int3(ii, jj, kk);
                     E = make_fpfield3(
                             field->Ex[fi.x][fi.y][fi.z],
                             field->Ey[fi.x][fi.y][fi.z],
@@ -314,7 +159,7 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
         // solve the position equation
         vt = v + qomdt2*El;
         // solve the velocity equation
-        v_ = vt + qomdt2 * (cross(vt, Bl) + qomdt2 * dot(vt, Bl) * Bl) * denom;
+        v_ = (vt + qomdt2 * (cross(vt, Bl) + qomdt2 * dot(vt, Bl) * Bl)) * denom;
         // update position
         p = p_ + v_ * dto2; 
     } // end of iteration
@@ -376,15 +221,14 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
         }
     }
 
-    part->u[i] = v.x; 
-    part->v[i] = v.y; 
-    part->w[i] = v.z; 
+    part->u[pix] = v.x; 
+    part->v[pix] = v.y; 
+    part->w[pix] = v.z; 
 
-    part->x[i] = p.x; 
-    part->y[i] = p.y; 
-    part->z[i] = p.z; 
+    part->x[pix] = p.x; 
+    part->y[pix] = p.y; 
+    part->z[pix] = p.z; 
 }
-#endif
                                                                         
 
 /** particle mover */
@@ -400,7 +244,7 @@ int mover_PC(struct particles* part, struct EMfield* field, struct grid* grd, st
             inner_loop(part, field, grd, param, i);
         }  // end of subcycling
     } // end of one particle
-                                                                        
+
     return(0); // exit succcesfully
 } // end of the mover
 
