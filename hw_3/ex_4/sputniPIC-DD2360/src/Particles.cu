@@ -82,7 +82,7 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
     int3 i; 
     int3 fi;
 
-    char3 peroidic = make_char3(param->PERIODICX, param->PERIODICY, param->PERIODICZ); 
+    char3 periodic = make_char3(param->PERIODICX, param->PERIODICY, param->PERIODICZ); 
 
     FPfield3 E, B;
 
@@ -105,8 +105,9 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
     p = p_;
 
     v = make_fppart3(part->u[pix], part->v[pix], part->w[pix]);
-
-    double3 start = make_double3(grd->xStart, grd->yStart, grd->zStart);
+    
+    // start is always zero, and the original code can't handle wrapping when it isnt.
+    //double3 start = make_double3(grd->xStart, grd->yStart, grd->zStart);
     double3 L = make_double3(grd->Lx, grd->Ly, grd->Lz);
     FPfield3 invd = make_fpfield3(grd->invdx, grd->invdy, grd->invdz); 
     FPfield invVOL = grd->invVOL;
@@ -115,7 +116,7 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
     // THIS LOOP IS SEQUENTIAL
     for(int innter=0; innter < part->NiterMover; innter++){
         // interpolation G-->P
-        i = 2 + make_int3((p - make_float3(start)) * invd);
+        i = 2 + make_int3(p * invd);
 
         // calculate weights
         N[0] = make_fpfield3(
@@ -168,7 +169,7 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
     p = p_ + v_ * dt_sub_cycling;
 
     if (p.x > L.x){
-        if (param->PERIODICX==true){ // PERIODIC
+        if (periodic.x){ // PERIODIC
             p.x = p.x - L.x;
         } else { // REFLECTING BC
             v.x = -v.x;
@@ -177,7 +178,7 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
     }
                                                                 
     if (p.x < 0){
-        if (param->PERIODICX==true){ // PERIODIC
+        if (periodic.x){ // PERIODIC
            p.x = p.x + L.x;
         } else { // REFLECTING BC
             v.x = -v.x;
@@ -186,7 +187,7 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
     }
 
     if (p.y > L.y){
-        if (param->PERIODICY==true){ // PERIODIC
+        if (periodic.y){ // PERIODIC
             p.y = p.y - L.y;
         } else { // REFLECTING BC
             v.y = -v.y;
@@ -195,7 +196,7 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
     }
                                                                 
     if (p.y < 0){
-        if (param->PERIODICY==true){ // PERIODIC
+        if (periodic.y){ // PERIODIC
            p.y = p.y + L.y;
         } else { // REFLECTING BC
             v.y = -v.y;
@@ -204,7 +205,7 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
     }
 
     if (p.z > L.z){
-        if (param->PERIODICZ==true){ // PERIODIC
+        if (periodic.z){ // PERIODIC
             p.z = p.z - L.z;
         } else { // REFLECTING BC
             v.z = -v.z;
@@ -213,7 +214,7 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
     }
                                                                 
     if (p.z < 0){
-        if (param->PERIODICZ==true){ // PERIODIC
+        if (periodic.z){ // PERIODIC
            p.z = p.z + L.z;
         } else { // REFLECTING BC
             v.z = -v.z;
