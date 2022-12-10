@@ -1165,6 +1165,13 @@ inline __device__ __host__ float4 lerp(float4 a, float4 b, float t)
 // - clamp the value v to be in the range [a, b]
 ////////////////////////////////////////////////////////////////////////////////
 
+inline __device__ __host__ char inrange(float lb, float val, float ub)
+{
+    char r = val < lb ? -1: 0;
+    return val > ub ? 1: r; 
+
+}
+
 inline __device__ __host__ float clamp(float f, float a, float b)
 {
     return fmaxf(a, fminf(f, b));

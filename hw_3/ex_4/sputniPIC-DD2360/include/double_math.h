@@ -134,6 +134,11 @@ inline __host__ __device__ double3 make_double3(float3 a)
     return make_double3(double(a.x), double(a.y), double(a.z));
 }
 
+inline __host__ __device__ float3 make_float3(double3 a)
+{
+    return make_float3(float(a.x), float(a.y), float(a.z));
+}
+
 inline __host__ __device__ int3 make_int3(double3 a)
 {
     return make_int3(int(a.x), int(a.y), int(a.z));
@@ -747,8 +752,8 @@ inline __host__ __device__ double3 cross(double3 a, double3 b)
 
 inline __device__ __host__ double smoothstep(double a, double b, double x)
 {
-    double y = clamp((x - a) / (b - a), 0.0f, 1.0f);
-    return (y*y*(3.0f - (2.0f*y)));
+    double y = clamp((x - a) / (b - a), 0.0, 1.0);
+    return (y*y*(3.0 - (2.0*y)));
 }
 inline __device__ __host__ double2 smoothstep(double2 a, double2 b, double2 x)
 {
