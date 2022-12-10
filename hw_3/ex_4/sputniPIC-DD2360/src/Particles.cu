@@ -94,23 +94,25 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
     // intermediate particle position and velocity
     FPpart xptilde, yptilde, zptilde, uptilde, vptilde, wptilde;
 
-    xptilde = part->x[i];
-    yptilde = part->y[i];
-    zptilde = part->z[i];
+    FPpart3 p = make_fppart3(part->x[i], part->y[i], part->z[i]);
+
+    xptilde = p.x;
+    yptilde = p.y;
+    zptilde = p.z;
     // calculate the average velocity iteratively
     for(int innter=0; innter < part->NiterMover; innter++){
         // interpolation G-->P
-        ix = 2 +  int((part->x[i] - grd->xStart)*grd->invdx);
-        iy = 2 +  int((part->y[i] - grd->yStart)*grd->invdy);
-        iz = 2 +  int((part->z[i] - grd->zStart)*grd->invdz);
+        ix = 2 +  int((p.x - grd->xStart)*grd->invdx);
+        iy = 2 +  int((p.y - grd->yStart)*grd->invdy);
+        iz = 2 +  int((p.z - grd->zStart)*grd->invdz);
         
         // calculate weights
-        xi[0]   = part->x[i] - grd->XN[ix - 1][iy][iz];
-        eta[0]  = part->y[i] - grd->YN[ix][iy - 1][iz];
-        zeta[0] = part->z[i] - grd->ZN[ix][iy][iz - 1];
-        xi[1]   = grd->XN[ix][iy][iz] - part->x[i];
-        eta[1]  = grd->YN[ix][iy][iz] - part->y[i];
-        zeta[1] = grd->ZN[ix][iy][iz] - part->z[i];
+        xi[0]   = p.x - grd->XN[ix - 1][iy][iz];
+        eta[0]  = p.y - grd->YN[ix][iy - 1][iz];
+        zeta[0] = p.z - grd->ZN[ix][iy][iz - 1];
+        xi[1]   = grd->XN[ix][iy][iz] - p.x;
+        eta[1]  = grd->YN[ix][iy][iz] - p.y;
+        zeta[1] = grd->ZN[ix][iy][iz] - p.z;
         for (int ii = 0; ii < 2; ii++)
             for (int jj = 0; jj < 2; jj++)
                 for (int kk = 0; kk < 2; kk++)
@@ -143,9 +145,9 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
         vptilde = (vt+qomdt2*(wt*Bxl -ut*Bzl + qomdt2*udotb*Byl))*denom;
         wptilde = (wt+qomdt2*(ut*Byl -vt*Bxl + qomdt2*udotb*Bzl))*denom;
         // update position
-        part->x[i] = xptilde + uptilde*dto2;
-        part->y[i] = yptilde + vptilde*dto2;
-        part->z[i] = zptilde + wptilde*dto2;
+        p.x = xptilde + uptilde*dto2;
+        p.y = yptilde + vptilde*dto2;
+        p.z = zptilde + wptilde*dto2;
         
         
     } // end of iteration
@@ -153,9 +155,9 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
     part->u[i]= 2.0*uptilde - part->u[i];
     part->v[i]= 2.0*vptilde - part->v[i];
     part->w[i]= 2.0*wptilde - part->w[i];
-    part->x[i] = xptilde + uptilde*dt_sub_cycling;
-    part->y[i] = yptilde + vptilde*dt_sub_cycling;
-    part->z[i] = zptilde + wptilde*dt_sub_cycling;
+    p.x = xptilde + uptilde*dt_sub_cycling;
+    p.y = yptilde + vptilde*dt_sub_cycling;
+    p.z = zptilde + wptilde*dt_sub_cycling;
     
     
     //////////
@@ -163,62 +165,66 @@ void inner_loop(struct particles* part, struct EMfield* field, struct grid* grd,
     ////////// BC
                                 
     // X-DIRECTION: BC particles
-    if (part->x[i] > grd->Lx){
+    if (p.x > grd->Lx){
         if (param->PERIODICX==true){ // PERIODIC
-            part->x[i] = part->x[i] - grd->Lx;
+            p.x = p.x - grd->Lx;
         } else { // REFLECTING BC
             part->u[i] = -part->u[i];
-            part->x[i] = 2*grd->Lx - part->x[i];
+            p.x = 2*grd->Lx - p.x;
         }
     }
                                                                 
-    if (part->x[i] < 0){
+    if (p.x < 0){
         if (param->PERIODICX==true){ // PERIODIC
-           part->x[i] = part->x[i] + grd->Lx;
+           p.x = p.x + grd->Lx;
         } else { // REFLECTING BC
             part->u[i] = -part->u[i];
-            part->x[i] = -part->x[i];
+            p.x = -p.x;
         }
     }
         
     
     // Y-DIRECTION: BC particles
-    if (part->y[i] > grd->Ly){
+    if (p.y > grd->Ly){
         if (param->PERIODICY==true){ // PERIODIC
-            part->y[i] = part->y[i] - grd->Ly;
+            p.y = p.y - grd->Ly;
         } else { // REFLECTING BC
             part->v[i] = -part->v[i];
-            part->y[i] = 2*grd->Ly - part->y[i];
+            p.y = 2*grd->Ly - p.y;
         }
     }
                                                                 
-    if (part->y[i] < 0){
+    if (p.y < 0){
         if (param->PERIODICY==true){ // PERIODIC
-            part->y[i] = part->y[i] + grd->Ly;
+            p.y = p.y + grd->Ly;
         } else { // REFLECTING BC
             part->v[i] = -part->v[i];
-            part->y[i] = -part->y[i];
+            p.y = -p.y;
         }
     }
                                                                 
     // Z-DIRECTION: BC particles
-    if (part->z[i] > grd->Lz){
+    if (p.z > grd->Lz){
         if (param->PERIODICZ==true){ // PERIODIC
-            part->z[i] = part->z[i] - grd->Lz;
+            p.z = p.z - grd->Lz;
         } else { // REFLECTING BC
             part->w[i] = -part->w[i];
-            part->z[i] = 2*grd->Lz - part->z[i];
+            p.z = 2*grd->Lz - p.z;
         }
     }
                                                                 
-    if (part->z[i] < 0){
+    if (p.z < 0){
         if (param->PERIODICZ==true){ // PERIODIC
-            part->z[i] = part->z[i] + grd->Lz;
+            p.z = p.z + grd->Lz;
         } else { // REFLECTING BC
             part->w[i] = -part->w[i];
-            part->z[i] = -part->z[i];
+            p.z = -p.z;
         }
     }
+
+    part->x[i] = p.x;
+    part->y[i] = p.y;
+    part->z[i] = p.z;
 }
 #endif
 #ifndef ORIGINAL
