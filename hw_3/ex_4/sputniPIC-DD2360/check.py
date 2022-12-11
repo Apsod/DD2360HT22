@@ -9,6 +9,8 @@ rhoi_10.vtk
 
 dirs = ['data', 'data_gt']
 
+print('diff = |x - y|, relative diff = 2 * diff / (|x| + |y|)')
+
 for f in files:
     f1 = open(os.path.join('data', f), 'rt')
     f2 = open(os.path.join('data_gt', f), 'rt')
@@ -21,14 +23,14 @@ for f in files:
         v1 = float(l1)
         v2 = float(l2)
         diff = abs(v1-v2)
-        relative = 2 * diff / (v1 + v2)
+        relative = 2 * diff / (abs(v1) + abs(v2))
 
         max_diff = max(diff, max_diff)
         max_relative = max(relative, max_relative)
-        N += 1; 
+        N += 1;
         mean_diff += (diff - mean_diff) / (N + 1)
         mean_relative += (relative - mean_relative) / (N + 1)
     print(f'{f}:')
-    print(f'  max diff : {max_diff:.3E}, max relative : {max_relative}')
-    print(f'  mean diff: {mean_diff:.3E}, mean relative: {mean_relative}')
+    print(f'  max  diff : {max_diff:.3E} , max  relative diff : {max_relative}')
+    print(f'  mean diff : {mean_diff:.3E} , mean relative diff : {mean_relative}')
     

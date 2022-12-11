@@ -304,7 +304,6 @@ int mover_PC(struct particles* part, struct EMfield* emfield, struct grid* grd, 
 
     FPpart3 *pos, *vel, *grid, *field;
 
-    FPpart3 *d_pos, *d_vel, *d_grid, *d_field;
 
     int3 grid_stride = make_int3(grd->nxn, grd->nyn, grd->nzn);
     int grid_size = get_size(grid_stride) * 2; 
@@ -335,6 +334,7 @@ int mover_PC(struct particles* part, struct EMfield* emfield, struct grid* grd, 
 
 
 #ifdef GPU
+    FPpart3 *d_pos, *d_vel, *d_grid, *d_field;
     cudaMalloc(&d_pos, nop * sizeof *d_pos);
     cudaMalloc(&d_vel, nop * sizeof *d_vel);
     cudaMalloc(&d_grid, grid_size * sizeof *d_grid);
