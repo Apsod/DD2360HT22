@@ -3,7 +3,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-#define ORIGINAL
+#define GPU
 
 /** allocate particle arrays */
 void particle_allocate(struct parameters* param, struct particles* part, int is)
@@ -124,7 +124,7 @@ void prep_grid_and_field(struct grid* grd, struct EMfield* field, FPfield3* out_
 }
 
 #ifndef ORIGINAL
-__global__ void inner_loop(
+__host__ __device__ void inner(
         FPpart3* pos,
         FPpart3* vel,
         FPpart3* field,
@@ -138,15 +138,10 @@ __global__ void inner_loop(
         char3 periodic,
         int NiterMover,
         int sub_cycles, 
-        int nop
+        int pix
         )
 {
     // auxiliary variables
-    int pix = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (pix >= nop)
-        return;
-
     FPpart dto2 = .5*dt_sub_cycling;
     FPpart omdtsq, denom;
     FPpart3 vt; 
@@ -175,13 +170,12 @@ __global__ void inner_loop(
     p = p_;
 
     v = vel[pix];
-
     
     // start is always zero, and the original code can't handle wrapping when it isnt.
     //double3 start = make_double3(grd->xStart, grd->yStart, grd->zStart);
 
     // calculate the average velocity iteratively
-    // THIS LOOP IS SEQUENTIAL
+    // THIS LOOP IS SEQUENTIAL (possible parallelism over dimensions x, y, and z.)
     for(int n_sub=0; n_sub < sub_cycles; n_sub++){
         for(int innter=0; innter < NiterMover; innter++){
             // interpolation G-->P
@@ -228,10 +222,10 @@ __global__ void inner_loop(
                 p.x = 2*L.x - p.x;
             }
         }
-                                                                    
+
         if (p.x < 0){
             if (periodic.x){ // PERIODIC
-               p.x = p.x + L.x;
+                p.x = p.x + L.x;
             } else { // REFLECTING BC
                 v.x = -v.x;
                 p.x = -p.x;
@@ -246,7 +240,7 @@ __global__ void inner_loop(
                 p.y = 2*L.y - p.y;
             }
         }
-                                                                    
+
         if (p.y < 0){
             if (periodic.y){ // PERIODIC
                p.y = p.y + L.y;
@@ -264,7 +258,7 @@ __global__ void inner_loop(
                 p.z = 2*L.z - p.z;
             }
         }
-                                                                    
+
         if (p.z < 0){
             if (periodic.z){ // PERIODIC
                p.z = p.z + L.z;
@@ -276,6 +270,29 @@ __global__ void inner_loop(
     }
     vel[pix] = v;
     pos[pix] = p; 
+}
+
+__global__ void inner_loop(
+        FPpart3* pos,
+        FPpart3* vel,
+        FPpart3* field,
+        FPpart3* grid,
+        int3 grid_stride,
+        double3 L,
+        FPfield3 invd,
+        FPfield invVOL,
+        FPpart dt_sub_cycling,
+        FPpart qomdt2,
+        char3 periodic,
+        int NiterMover,
+        int sub_cycles, 
+        int nop
+        )
+{
+    // auxiliary variables
+    int pix = blockIdx.x * blockDim.x + threadIdx.x;
+    if (pix < nop)
+        inner(pos, vel, field, grid, grid_stride, L, invd, invVOL, dt_sub_cycling, qomdt2, periodic, NiterMover, sub_cycles, pix);
 }
 
 
@@ -295,11 +312,10 @@ int mover_PC(struct particles* part, struct EMfield* emfield, struct grid* grd, 
     int sub_cycles = part->n_sub_cycles;
     pos = new FPpart3[nop]; 
     vel = new FPpart3[nop];
-    // std::cout << "*** ALLOCATING GRID. SIZE: " << get_size(grid_stride) * 2 * 4 * 3 << " Bytes.  ***" << std::endl; 
+
     grid = new FPpart3[grid_size];
     field = new FPpart3[grid_size];
 
-    // std::cout << "*** PREPPING GRID ***" << std::endl; 
     prep_grid_and_field(grd, emfield, grid, field); 
 
     FPpart dt_sub_cycling = (FPpart) param->dt/((double) sub_cycles);
@@ -312,12 +328,13 @@ int mover_PC(struct particles* part, struct EMfield* emfield, struct grid* grd, 
     FPfield3 invd = make_fpfield3(grd->invdx, grd->invdy, grd->invdz); 
     FPfield invVOL = grd->invVOL;
 
-    // std::cout << "*** PREPPING POS & VEL ***" << std::endl; 
     for (int i=0; i<nop; ++i){
         pos[i] = make_fppart3(part->x[i], part->y[i], part->z[i]);
         vel[i] = make_fppart3(part->u[i], part->v[i], part->w[i]);
     }
 
+
+#ifdef GPU
     cudaMalloc(&d_pos, nop * sizeof *d_pos);
     cudaMalloc(&d_vel, nop * sizeof *d_vel);
     cudaMalloc(&d_grid, grid_size * sizeof *d_grid);
@@ -331,28 +348,16 @@ int mover_PC(struct particles* part, struct EMfield* emfield, struct grid* grd, 
     int BLOCKS = divUp(nop, 32);
     int THREADS = 32;
 
-
-    // std::cout << "*** STARTING ***" << std::endl; 
-    // start subcycling
-    //for (int i_sub=0; i_sub <  part->n_sub_cycles; i_sub++){
-    //    // move each particle with new fields
-    //    for (int i=0; i <  part->nop; i++){
-    //        inner_loop(pos, vel, fieldEB, grid, grid_stride, L, invd, invVOL, dt_sub_cycling, qomdt2, periodic, NiterMover, i);
-    //    }  // end of subcycling
-    //} // end of one particle
     inner_loop<<<BLOCKS, THREADS>>>(d_pos, d_vel, d_field, d_grid, grid_stride, L, invd, invVOL, dt_sub_cycling, qomdt2, periodic, NiterMover, sub_cycles, nop);
-    //for (int i=0; i <  part->nop; i++){
-    //    for (int i_sub=0; i_sub <  part->n_sub_cycles; i_sub++){
-    //        inner_loop(pos, vel, fieldEB, grid, grid_stride, L, invd, invVOL, dt_sub_cycling, qomdt2, periodic, NiterMover, i, sub_cycles, nop);
-    //    }  // end of subcycling
-    //} // end of one particle
+
     cudaMemcpy(pos, d_pos, nop * sizeof *d_pos, cudaMemcpyDeviceToHost);
     cudaMemcpy(vel, d_vel, nop * sizeof *d_vel, cudaMemcpyDeviceToHost);
-
-    for (FPpart3 *ptr : {d_pos, d_vel, grid, field}) {
-        cudaFree(ptr);
+#endif
+#ifndef GPU
+    for (int i=0; i<nop; i++){
+        inner(pos, vel, field, grid, grid_stride, L, invd, invVOL, dt_sub_cycling, qomdt2, periodic, NiterMover, sub_cycles, i);
     }
-
+#endif
     for (int i=0; i<nop; ++i){
         part->x[i] = pos[i].x;
         part->y[i] = pos[i].y;
@@ -360,6 +365,14 @@ int mover_PC(struct particles* part, struct EMfield* emfield, struct grid* grd, 
         part->u[i] = vel[i].x;
         part->v[i] = vel[i].y;
         part->w[i] = vel[i].z;
+    }
+
+    for (FPpart3 *ptr : {d_pos, d_vel, d_grid, d_field}) {
+        cudaFree(ptr);
+    }
+
+    for (FPpart3 *ptr : {pos, vel, grid, field}) {
+        free(ptr);
     }
 
     return(0); // exit succcesfully
