@@ -352,6 +352,10 @@ int mover_PC(struct particles* part, struct EMfield* emfield, struct grid* grd, 
 
     cudaMemcpy(pos, d_pos, nop * sizeof *d_pos, cudaMemcpyDeviceToHost);
     cudaMemcpy(vel, d_vel, nop * sizeof *d_vel, cudaMemcpyDeviceToHost);
+    
+    for (FPpart3 *ptr : {d_pos, d_vel, d_grid, d_field}) {
+        cudaFree(ptr);
+    }
 #endif
 #ifndef GPU
     for (int i=0; i<nop; i++){
@@ -365,10 +369,6 @@ int mover_PC(struct particles* part, struct EMfield* emfield, struct grid* grd, 
         part->u[i] = vel[i].x;
         part->v[i] = vel[i].y;
         part->w[i] = vel[i].z;
-    }
-
-    for (FPpart3 *ptr : {d_pos, d_vel, d_grid, d_field}) {
-        cudaFree(ptr);
     }
 
     for (FPpart3 *ptr : {pos, vel, grid, field}) {
