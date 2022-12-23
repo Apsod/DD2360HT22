@@ -203,14 +203,14 @@ int main(int argc, char **argv) {
   
   // Free the GPU memory
 
-  cudaEventDestroy(start);
-  cudaEventDestroy(stop);
+  checkCuda(cudaEventDestroy(start));
+  checkCuda(cudaEventDestroy(stop));
 
   for (int i=0; i < n_streams; ++i)
-    cudaStreamDestroy(streams[i]);
+    checkCuda(cudaStreamDestroy(streams[i]));
 
-  cudaFree(deviceMemory);
-  cudaFreeHost(hostMemory);
+  checkCuda(cudaFree(deviceMemory));
+  checkCuda(cudaFreeHost(hostMemory));
   free(resultRef);
 
   return 0;
