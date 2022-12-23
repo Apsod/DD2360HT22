@@ -59,9 +59,6 @@ int main(int argc, char **argv) {
   DataType *resultRef;
 
   DataType *deviceMemory;
-  DataType *deviceInput1;
-  DataType *deviceInput2;
-  DataType *deviceOutput;
 
   
   // Initialize the 1D grid and block dimensions here
@@ -73,12 +70,13 @@ int main(int argc, char **argv) {
   segment_size = min(segment_size, inputLength); 
 
 
-  int segments = divUp(inputLength, segment_size);
-  int BLOCKS = divUp(segment_size, 1024);
-  int TPB = divUp(segment_size, BLOCKS);
+  const int segments = divUp(inputLength, segment_size);
+  const int BLOCKS = divUp(segment_size, 1024);
+  const int TPB = divUp(segment_size, BLOCKS);
+  const int n_streams = min(segments, STREAMS);
 
   printf("The input length is   : %d\n", inputLength);
-  printf("number of streams     : %d\n", STREAMS);
+  printf("number of streams     : %d\n", n_streams);
   printf("number of segments    : %d\n", segments);
   printf("number of blocks/str  : %d\n", BLOCKS);
   printf("number of threads/str : %d\n", TPB);
@@ -121,20 +119,26 @@ int main(int argc, char **argv) {
   cudaEventElapsedTime(&elapsed, start, stop); 
   printf("host execution time   (ms) : %f\n", elapsed);
 
-  cudaStream_t streams[STREAMS];
-  for (int i=0; i < STREAMS; ++i)
-    cudaStreamCreate(&streams[i]);
   // Allocate GPU memory
   
   cudaEventRecord(start);
-  checkCuda(cudaMalloc(&deviceMemory, inputLength * 3 * sizeof(DataType)));
-  deviceInput1 = &deviceMemory[0*inputLength];
-  deviceInput2 = &deviceMemory[1*inputLength];
-  deviceOutput = &deviceMemory[2*inputLength];
+  checkCuda(cudaMalloc(&deviceMemory, n_streams * segment_size * 3 * sizeof(DataType)));
   cudaEventRecord(stop);
   cudaEventSynchronize(stop);
   cudaEventElapsedTime(&elapsed, start, stop); 
   printf("cudamalloc            (ms) : %f\n", elapsed);
+
+  cudaStream_t streams[n_streams];
+  DataType *deviceInput1[n_streams];
+  DataType *deviceInput2[n_streams];
+  DataType *deviceOutput[n_streams];
+  for (int i=0; i < n_streams; ++i){
+    cudaStreamCreate(&streams[i]);
+    int offset = i * segment_size * 3;
+    deviceInput1[i] = &deviceMemory[offset+0*segment_size];
+    deviceInput2[i] = &deviceMemory[offset+1*segment_size];
+    deviceOutput[i] = &deviceMemory[offset+2*segment_size];
+  }
 
   // Copy memory to the GPU
   
@@ -146,15 +150,16 @@ int main(int argc, char **argv) {
     int offset = i * segment_size;
     int len = min(segment_size, inputLength - offset);
     int bytes = len * sizeof(DataType); 
-    cudaStream_t stream = streams[i % STREAMS];
-    cudaMemcpyAsync(&deviceInput1[offset], &hostInput1[offset], bytes,
+    int stream_ix = i % n_streams;
+    cudaStream_t stream = streams[stream_ix];
+    cudaMemcpyAsync(deviceInput1[stream_ix], &hostInput1[offset], bytes,
         cudaMemcpyHostToDevice, stream
         ); 
-    cudaMemcpyAsync(&deviceInput2[offset], &hostInput2[offset], bytes,
+    cudaMemcpyAsync(deviceInput2[stream_ix], &hostInput2[offset], bytes,
         cudaMemcpyHostToDevice, stream
         ); 
-    vecAdd<<<BLOCKS, TPB, 0, stream>>>(&deviceInput1[offset], &deviceInput2[offset], &deviceOutput[offset], len);
-    cudaMemcpyAsync(&hostOutput[offset], &deviceOutput[offset], bytes,
+    vecAdd<<<BLOCKS, TPB, 0, stream>>>(deviceInput1[stream_ix], deviceInput2[stream_ix], deviceOutput[stream_ix], len);
+    cudaMemcpyAsync(&hostOutput[offset], deviceOutput[stream_ix], bytes,
         cudaMemcpyDeviceToHost, stream
         ); 
   }
@@ -201,12 +206,12 @@ int main(int argc, char **argv) {
   cudaEventDestroy(start);
   cudaEventDestroy(stop);
 
-  for (int i=0; i < STREAMS; ++i)
+  for (int i=0; i < n_streams; ++i)
     cudaStreamDestroy(streams[i]);
 
   cudaFree(deviceMemory);
-
   cudaFreeHost(hostMemory);
+  free(resultRef);
 
   return 0;
 }
