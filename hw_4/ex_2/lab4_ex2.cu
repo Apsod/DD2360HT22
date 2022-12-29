@@ -5,6 +5,7 @@
 #include <random>
 #include <vector>
 
+#define DEBUG
 #define DataType double
 #ifndef STREAMS
 #define STREAMS 4 
@@ -96,7 +97,7 @@ int main(int argc, char **argv) {
   hostOutput = &hostMemory[2*inputLength];
 
 
-  resultRef = (DataType*) malloc(inputLength * sizeof *resultRef);
+  resultRef = (DataType*) malloc(inputLength * sizeof(DataType));
   
   
   // Initialize hostInput1 and hostInput2 to random numbers.
@@ -141,8 +142,6 @@ int main(int argc, char **argv) {
   }
 
   // Copy memory to the GPU
-  
-
 
   // Launch the streams
   cudaEventRecord(start);
