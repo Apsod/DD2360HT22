@@ -157,6 +157,12 @@ int main(int argc, char **argv) {
   temp[dimX - 1] = tempRight;
   cputimer_stop("Initializing memory on the host");
 
+  cudaMemAdvise(&temp, dimX * sizeof(double), cudaMemAdviseSetPreferredLocation, device);
+  cudaMemAdvise(&tmp, dimX * sizeof(double), cudaMemAdviseSetPreferredLocation, device);
+  cudaMemAdvise(&A,  nzv * sizeof(double), cudaMemAdviseSetReadMostly, device);
+  cudaMemAdvise(&ARowPtr,  nzv * sizeof(int), cudaMemAdviseSetReadMostly, device);
+  cudaMemAdvise(&AColIndx,  nzv * sizeof(int), cudaMemAdviseSetReadMostly, device);
+
   if (concurrentAccessQ) {
     cputimer_start();
     //@@ Insert code to prefetch in Unified Memory asynchronously to the GPU
@@ -218,9 +224,10 @@ int main(int argc, char **argv) {
 
     //@@ Insert code to call cublas api to compute the norm of the vector using cuBLAS
     //@@ This calculation corresponds to: ||temp||
+    //                              ====>  ||tmp|| ??
     cublasDnrm2(cublasHandle, dimX, tmp, 1, &norm);
 
-    //             ===> tmp ?
+    //             ==> tmp  ???
     // If the norm of A*temp is smaller than 10^-4 exit the loop
     if (norm < 1e-4){
       break;
