@@ -7,6 +7,7 @@
 #include <thrust/device_ptr.h>
 #include <thrust/sequence.h>
 
+
 #define gpuCheck(stmt)                                               \
   do {                                                               \
       cudaError_t err = stmt;                                        \
@@ -127,6 +128,10 @@ int main(int argc, char **argv) {
   cudaMallocManaged(&ARowPtr, nzv * sizeof(int));
   cudaMallocManaged(&AColIndx, nzv * sizeof(int));
   cputimer_stop("Allocating device memory");
+
+#ifdef NOCONC
+  concurrentAccesQ = 0; 
+#endif
 
   // Check if concurrentAccessQ is non zero in order to prefetch memory
   if (concurrentAccessQ) {
