@@ -222,7 +222,7 @@ int main(int argc, char **argv) {
     }
   }
   printf("number of steps: %d\n", it);
-  int GFLOPS = ((double) it) * ((double) nzv) / (time * 1e3);
+  double GFLOPS = ((double) it) * ((double) nzv) / (time * 1e3);
   printf("GFlops/s: %f\n", GFLOPS);
 
   // Calculate the exact solution using thrust
