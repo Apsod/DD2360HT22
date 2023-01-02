@@ -221,9 +221,10 @@ int main(int argc, char **argv) {
       break;
     }
   }
+  printf("time spent in SpMV: %f\n", time); 
   printf("number of steps: %d\n", it);
-  double GFLOPS = ((double) it) * ((double) nzv) / (time * 1e3);
-  printf("GFlops/s: %f\n", GFLOPS);
+  //double GFLOPS = ((double) it) * ((double) nzv) / (time * 1e3);
+  //printf("GFlops/s: %f\n", GFLOPS);
 
   // Calculate the exact solution using thrust
   thrust::device_ptr<double> thrustPtr(tmp);
