@@ -130,7 +130,7 @@ int main(int argc, char **argv) {
   cputimer_stop("Allocating device memory");
 
 #ifdef NOCONC
-  concurrentAccesQ = 0; 
+  concurrentAccessQ = 0; 
 #endif
 
   // Check if concurrentAccessQ is non zero in order to prefetch memory
