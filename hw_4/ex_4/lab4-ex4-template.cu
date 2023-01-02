@@ -204,6 +204,7 @@ int main(int argc, char **argv) {
     cusparseSpMV(cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE, 
         &one, Adescriptor, temp_descr, &zero, tmp_descr,
         CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG1, buffer);
+    cudaDeviceSynchronize();
     time += cputimer_get();
     
     //@@ Insert code to call cublas api to compute the axpy routine using cuBLAS.
@@ -221,12 +222,8 @@ int main(int argc, char **argv) {
     }
   }
   printf("number of steps: %d\n", it);
-  int FLOPS = it * nzv;
-  printf("number of flops: %d\n", FLOPS);
-  printf("GFlops/s: %f\n", ((double) FLOPS) / (time * 1e3));
-
-
-
+  int GFLOPS = ((double) it) * ((double) nzv) / (time * 1e3);
+  printf("GFlops/s: %f\n", GFLOPS);
 
   // Calculate the exact solution using thrust
   thrust::device_ptr<double> thrustPtr(tmp);
