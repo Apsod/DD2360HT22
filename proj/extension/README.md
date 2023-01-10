@@ -2,25 +2,51 @@
 
 ## Requirements
 
-pytorch with cuda, for installation, this can be installed with conda in the following way:
+To run you need pytorch with cuda, this can be installed with conda in the following way (with cuda version 11.7):
 
 ```
 conda install pytorch pytorch-cuda=11.7 -c pytorch -c nvidia
 ``` 
+
 For more installation instructions see https://pytorch.org/get-started/locally/
 
 ## Installation
 In this folder, run python setup.py install. This will compile the cuda kernel and make it accessible within pytorch. 
 
+## Usage
+
+all code for running the program is included in `test.py`: 
+
+```
+usage: test.py [-h] [--dtype {f,d}] batch_size factor [factor ...] {check,profile,bench} ...
+
+positional arguments:
+  batch_size
+  factor
+  {check,profile,bench}
+
+options:
+  -h, --help            show this help message and exit
+  --dtype {f,d}
+```
+
+This program can be used for validation checking (making sure that the various implementation returns the same result), profiling, and benchmarking.
+
+`--dtype` specificies whether to use single precision floats (`f`) or double precision floats (`d`).
+
+`batch_size` specifies the batch size of the input tensor. 
+
+`factor` specifies the factorization of the layer. 
+
 ## Checking validity
 
-To check that the cuda kernel returns the correct output, run:
+To check that the cuda kernel returns the correct output, run, for example:
 
 ```
 python test.py --dtype d 16 32 32 check
 ```
 
-This checks the tree implementations for a batch size of 16, and two factors (32 and 32).
+This checks the three implementations for a batch size of 16, and two factors (32 and 32).
 It performs a forward pass and a bakcwards pass, and checks that they align between versions.
 (Note that backwards pass for the cuda kernel is not yet implemented)
 It should output something like the following:
